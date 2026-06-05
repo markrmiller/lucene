@@ -17,6 +17,7 @@
 package org.apache.lucene.search;
 
 import java.io.IOException;
+import java.util.Set;
 import org.apache.lucene.index.LeafReaderContext;
 
 /**
@@ -67,5 +68,10 @@ public abstract class FilterWeight extends Weight {
   @Override
   public int count(LeafReaderContext context) throws IOException {
     return in.count(context);
+  }
+
+  @Override
+  public Set<QueryReadHint> readHints() {
+    return in.readHints();
   }
 }

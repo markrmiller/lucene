@@ -18,9 +18,11 @@
 package org.apache.lucene.search.knn;
 
 import java.io.IOException;
+import java.util.Set;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnCollector;
+import org.apache.lucene.search.QueryReadHint;
 import org.apache.lucene.search.TopKnnCollector;
 
 /** TopKnnCollectorManager responsible for creating {@link TopKnnCollector} instances. */
@@ -28,9 +30,13 @@ public class TopKnnCollectorManager implements KnnCollectorManager {
 
   // the number of docs to collect
   private final int k;
+  // Per-query read hints carried from the IndexSearcher, surfaced to codec readers via
+  // KnnCollector#readHints(). Empty (the default) means no hint and no extra allocation.
+  private final Set<QueryReadHint> readHints;
 
   public TopKnnCollectorManager(int k, IndexSearcher indexSearcher) {
     this.k = k;
+    this.readHints = indexSearcher == null ? Set.of() : indexSearcher.getReadHints();
   }
 
   /**
@@ -43,17 +49,36 @@ public class TopKnnCollectorManager implements KnnCollectorManager {
   public KnnCollector newCollector(
       int visitedLimit, KnnSearchStrategy searchStrategy, LeafReaderContext context)
       throws IOException {
-    return new TopKnnCollector(k, visitedLimit, searchStrategy);
+    return withReadHints(new TopKnnCollector(k, visitedLimit, searchStrategy));
   }
 
   @Override
   public KnnCollector newOptimisticCollector(
       int visitedLimit, KnnSearchStrategy searchStrategy, LeafReaderContext context, int k) {
-    return new TopKnnCollector(k, visitedLimit, searchStrategy);
+    return withReadHints(new TopKnnCollector(k, visitedLimit, searchStrategy));
   }
 
   @Override
   public boolean isOptimistic() {
     return true;
+  }
+
+  /**
+   * Surface the searcher's read hints on the produced collector so codec readers (e.g. {@link
+   * org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader}) can consult {@link
+   * KnnCollector#readHints()}. This is what connects {@link IndexSearcher#setReadHints} to the
+   * vector reader. When there are no hints the collector is returned unwrapped, so the default path
+   * allocates nothing extra.
+   */
+  private KnnCollector withReadHints(KnnCollector collector) {
+    if (readHints.isEmpty()) {
+      return collector;
+    }
+    return new KnnCollector.Decorator(collector) {
+      @Override
+      public Set<QueryReadHint> readHints() {
+        return readHints;
+      }
+    };
   }
 }

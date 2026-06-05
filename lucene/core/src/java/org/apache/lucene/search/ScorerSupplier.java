@@ -17,6 +17,7 @@
 package org.apache.lucene.search;
 
 import java.io.IOException;
+import java.util.Set;
 import org.apache.lucene.search.Weight.DefaultBulkScorer;
 
 /**
@@ -62,4 +63,18 @@ public abstract class ScorerSupplier {
    * Scorer#setMinCompetitiveScore(float)} calls.
    */
   public void setTopLevelScoringClause() {}
+
+  /**
+   * Per-query, per-leaf read hints attached to this supplier. Default is an empty set.
+   *
+   * <p>Intended to mirror the hints from the parent {@link Weight#readHints()} so readers consulted
+   * while building or running the scorer can inspect them. Provided for queries that choose to opt
+   * in; no built-in core query overrides it yet, so by default it is empty. Hints are advisory and
+   * never affect correctness.
+   *
+   * @lucene.experimental
+   */
+  public Set<QueryReadHint> readHints() {
+    return Set.of();
+  }
 }

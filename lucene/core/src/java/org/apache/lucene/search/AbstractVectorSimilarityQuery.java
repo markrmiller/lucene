@@ -21,6 +21,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.QueryTimeout;
@@ -133,6 +134,56 @@ abstract class AbstractVectorSimilarityQuery extends Query {
     return searchStrategy;
   }
 
+  /**
+   * Surface the searcher's read hints on the collectors produced by {@code delegate}, so codec
+   * readers can consult {@link KnnCollector#readHints()} on the approximate (graph) search path
+   * (the same wiring as {@link org.apache.lucene.search.knn.TopKnnCollectorManager}). Returns
+   * {@code delegate} unchanged when there are no hints, so the default path allocates nothing
+   * extra.
+   *
+   * <p>Note: the exact-search fallback paths in this query ({@code decay == DECAY_MAX_QUALITY}, or
+   * an incomplete filtered approximate search) build their own {@link VectorScorer} via {@link
+   * #createVectorScorer} and do not consult hints, so they are unaffected.
+   */
+  private static KnnCollectorManager withReadHints(
+      KnnCollectorManager delegate, Set<QueryReadHint> readHints) {
+    if (readHints.isEmpty()) {
+      return delegate;
+    }
+    return new KnnCollectorManager() {
+      @Override
+      public KnnCollector newCollector(
+          int visitedLimit, KnnSearchStrategy strategy, LeafReaderContext context)
+          throws IOException {
+        return decorate(delegate.newCollector(visitedLimit, strategy, context));
+      }
+
+      @Override
+      public KnnCollector newOptimisticCollector(
+          int visitedLimit, KnnSearchStrategy strategy, LeafReaderContext context, int k)
+          throws IOException {
+        return decorate(delegate.newOptimisticCollector(visitedLimit, strategy, context, k));
+      }
+
+      @Override
+      public boolean isOptimistic() {
+        return delegate.isOptimistic();
+      }
+
+      private KnnCollector decorate(KnnCollector collector) {
+        if (collector == null) {
+          return null;
+        }
+        return new KnnCollector.Decorator(collector) {
+          @Override
+          public Set<QueryReadHint> readHints() {
+            return readHints;
+          }
+        };
+      }
+    };
+  }
+
   abstract VectorScorer createVectorScorer(LeafReaderContext context) throws IOException;
 
   protected abstract TopDocs approximateSearch(
@@ -153,7 +204,8 @@ abstract class AbstractVectorSimilarityQuery extends Query {
 
       final QueryTimeout queryTimeout = searcher.getTimeout();
       final TimeLimitingKnnCollectorManager timeLimitingKnnCollectorManager =
-          new TimeLimitingKnnCollectorManager(getKnnCollectorManager(), queryTimeout);
+          new TimeLimitingKnnCollectorManager(
+              withReadHints(getKnnCollectorManager(), searcher.getReadHints()), queryTimeout);
 
       @Override
       public Explanation explain(LeafReaderContext context, int doc) throws IOException {

@@ -18,9 +18,11 @@
 package org.apache.lucene.search.join;
 
 import java.io.IOException;
+import java.util.Set;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnCollector;
+import org.apache.lucene.search.QueryReadHint;
 import org.apache.lucene.search.knn.KnnCollectorManager;
 import org.apache.lucene.search.knn.KnnSearchStrategy;
 import org.apache.lucene.util.BitSet;
@@ -35,6 +37,10 @@ public class DiversifyingNearestChildrenKnnCollectorManager implements KnnCollec
   private final int k;
   // filter identifying the parent documents.
   private final BitSetProducer parentsFilter;
+  // Read hints carried from the IndexSearcher, surfaced to codec readers via
+  // KnnCollector#readHints() (e.g. QueryAccessHint.POINT prefetch in Lucene99HnswVectorsReader).
+  // Empty (the default) means no hint and no extra allocation.
+  private final Set<QueryReadHint> readHints;
 
   /**
    * Constructor
@@ -46,6 +52,7 @@ public class DiversifyingNearestChildrenKnnCollectorManager implements KnnCollec
       int k, BitSetProducer parentsFilter, IndexSearcher indexSearcher) {
     this.k = k;
     this.parentsFilter = parentsFilter;
+    this.readHints = indexSearcher == null ? Set.of() : indexSearcher.getReadHints();
   }
 
   /**
@@ -62,8 +69,8 @@ public class DiversifyingNearestChildrenKnnCollectorManager implements KnnCollec
     if (parentBitSet == null) {
       return null;
     }
-    return new DiversifyingNearestChildrenKnnCollector(
-        k, visitedLimit, searchStrategy, parentBitSet);
+    return withReadHints(
+        new DiversifyingNearestChildrenKnnCollector(k, visitedLimit, searchStrategy, parentBitSet));
   }
 
   @Override
@@ -74,12 +81,30 @@ public class DiversifyingNearestChildrenKnnCollectorManager implements KnnCollec
     if (parentBitSet == null) {
       return null;
     }
-    return new DiversifyingNearestChildrenKnnCollector(
-        k, visitedLimit, searchStrategy, parentBitSet);
+    return withReadHints(
+        new DiversifyingNearestChildrenKnnCollector(k, visitedLimit, searchStrategy, parentBitSet));
   }
 
   @Override
   public boolean isOptimistic() {
     return true;
+  }
+
+  /**
+   * Surface the searcher's read hints on the produced collector so codec readers can consult {@link
+   * KnnCollector#readHints()} (the same wiring as {@link
+   * org.apache.lucene.search.knn.TopKnnCollectorManager}). When there are no hints the collector is
+   * returned unwrapped, so the default path allocates nothing extra.
+   */
+  private KnnCollector withReadHints(KnnCollector collector) {
+    if (readHints.isEmpty()) {
+      return collector;
+    }
+    return new KnnCollector.Decorator(collector) {
+      @Override
+      public Set<QueryReadHint> readHints() {
+        return readHints;
+      }
+    };
   }
 }

@@ -18,6 +18,7 @@ package org.apache.lucene.search;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Set;
 import org.apache.lucene.index.IndexReaderContext;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
@@ -107,6 +108,21 @@ public abstract class Weight implements SegmentCacheable {
   /** The query that this concerns. */
   public final Query getQuery() {
     return parentQuery;
+  }
+
+  /**
+   * Per-query read hints attached to this weight. Default is an empty set.
+   *
+   * <p>This is the channel by which a {@link Query} may carry the searcher's {@link
+   * IndexSearcher#getReadHints()} down to its per-leaf {@link ScorerSupplier#readHints()} so codec
+   * readers (postings, doc values, points, ...) can consult them. It is provided for queries that
+   * choose to opt in; no built-in core query overrides it yet, so by default it is empty. Hints are
+   * advisory and never affect correctness.
+   *
+   * @lucene.experimental
+   */
+  public Set<QueryReadHint> readHints() {
+    return Set.of();
   }
 
   /**

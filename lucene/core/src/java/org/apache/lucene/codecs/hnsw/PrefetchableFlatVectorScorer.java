@@ -50,6 +50,35 @@ public class PrefetchableFlatVectorScorer implements FlatVectorsScorer {
     this.flatVectorsScorer = flatVectorsScorer;
   }
 
+  /**
+   * If {@code base} exposes its {@link KnnVectorValues} (i.e. it is a {@code
+   * RandomVectorScorer.AbstractRandomVectorScorer}) and is not already a prefetching wrapper,
+   * return a scorer whose {@link RandomVectorScorer#bulkScore} first calls {@link
+   * KnnVectorValues#prefetch(int[], int)} on the batch's ordinals before delegating; otherwise
+   * return {@code base} unchanged.
+   *
+   * <p>The wrapper delegates {@code score}/{@code bulkScore}/{@code maxOrd}/{@code ordToDoc}/{@code
+   * getAcceptOrds}/{@code values} to {@code base}, so it cannot change scoring or which doc an
+   * ordinal maps to -- the prefetch is purely advisory. It is itself a no-op when the underlying
+   * {@link KnnVectorValues} does not override {@link KnnVectorValues#prefetch} (the default), or
+   * when the pages are already resident (the directory's {@code prefetch} short-circuits).
+   *
+   * <p>Returns {@code base} unchanged for scorers that do not expose {@link KnnVectorValues} (e.g.
+   * bit-vector scorers), which is why this never affects correctness for any encoding.
+   *
+   * @lucene.experimental
+   */
+  public static RandomVectorScorer wrapWithPrefetch(RandomVectorScorer base) {
+    if (base instanceof PrefetchableRandomVectorScorer) {
+      // Already prefetching (e.g. a format whose FlatVectorsScorer is this one); don't double-wrap.
+      return base;
+    }
+    if (base instanceof RandomVectorScorer.AbstractRandomVectorScorer arvs) {
+      return new PrefetchableRandomVectorScorer(arvs);
+    }
+    return base;
+  }
+
   @Override
   public RandomVectorScorerSupplier getRandomVectorScorerSupplier(
       VectorSimilarityFunction similarityFunction, KnnVectorValues vectorValues)
